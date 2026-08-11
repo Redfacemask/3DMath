@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Math Defender - 3D FPS Math Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #020208;
+            font-family: 'Rajdhani', sans-serif;
+            user-select: none;
+        }
+        .font-orbitron {
+            font-family: 'Orbitron', sans-serif;
+        }
+        /* Custom Glowing UI Elements */
+        .neon-border {
+            box-shadow: 0 0 15px rgba(0, 243, 255, 0.4), inset 0 0 15px rgba(0, 243, 255, 0.2);
+            border: 1px solid rgba(0, 243, 255, 0.6);
+        }
+        .neon-border-red {
+            box-shadow: 0 0 15px rgba(255, 0, 85, 0.4), inset 0 0 15px rgba(255, 0, 85, 0.2);
+            border: 1px solid rgba(255, 0, 85, 0.6);
+        }
+        .neon-text-cyan {
+            text-shadow: 0 0 8px rgba(0, 243, 255, 0.8);
+        }
+        .neon-text-red {
+            text-shadow: 0 0 8px rgba(255, 0, 85, 0.8);
+        }
+        /* Damage Flash Overlay */
+        #vignette {
+            pointer-events: none;
+            transition: opacity 0.15s ease-out;
+        }
+        .damage-flash {
+            box-shadow: inset 0 0 100px 40px rgba(255, 0, 50, 0.8);
+        }
+    </style>
+</head>
+<body class="relative w-screen h-screen">
+
+    <!-- WebGL Canvas Container -->
+    <div id="canvas-container" class="absolute inset-0 w-full h-full z-0"></div>
+
+    <!-- Red Damage Flash Vignette -->
+    <div id="vignette" class="absolute inset-0 w-full h-full z-10 opacity-0 transition-opacity duration-200"></div>
+
+    <!-- In-Game HUD -->
+    <div id="hud" class="absolute inset-0 z-20 pointer-events-none p-6 flex flex-col justify-between hidden">
+        <!-- Top Stats Bar -->
+        <div class="flex justify-between items-start max-w-4xl w-full mx-auto">
+            <div class="bg-slate-900/80 backdrop-blur-md p-4 rounded-xl neon-border flex flex-col gap-1 min-w-[220px]">
+                <div class="flex justify-between items-center">
+                    <span class="text-cyan-400 font-bold text-sm tracking-wider">SHIELD (護盾)</span>
+                    <span id="hp-text" class="text-cyan-300 font-orbitron font-bold text-lg">100%</span>
+                </div>
+                <div class="w-full bg-slate-800 h-3 rounded-full overflow-hidden p-0.5 border border-cyan-500/30">
+                    <div id="hp-bar" class="bg-gradient-to-r from-cyan-500 to-emerald-400 h-full rounded-full transition-all duration-300" style="width: 100%;"></div>
+                </div>
+            </div>
+
+            <!-- Wave & Score Info -->
+            <div class="flex gap-4">
+                <div class="bg-slate-900/80 backdrop-blur-md px-6 py-3 rounded-xl neon-border text-center">
+                    <div class="text-slate-400 text-xs tracking-widest font-bold">WAVE (波次)</div>
+                    <div id="wave-display" class="text-3xl font-orbitron font-black text-amber-400 neon-text-cyan">1</div>
+                </div>
+                <div class="bg-slate-900/80 backdrop-blur-md px-6 py-3 rounded-xl neon-border text-center min-w-[140px]">
+                    <div class="text-slate-400 text-xs tracking-widest font-bold">SCORE (分數)</div>
+                    <div id="score-display" class="text-3xl font-orbitron font-black text-cyan-400 neon-text-cyan">0</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Central Floating Hit Indicator Message -->
+        <div id="hit-feedback" class="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none opacity-0 transition-all duration-200">
+            <span id="feedback-text" class="font-orbitron text-3xl font-extrabold tracking-wider"></span>
+        </div>
+
+        <!-- Custom SVG FPS Crosshair -->
+        <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <svg id="crosshair" class="w-12 h-12 text-cyan-400/80 transition-transform duration-75" viewBox="0 0 100 100">
+                <circle cx="50" cy="50" r="12" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 2"/>
+                <circle cx="50" cy="50" r="3" fill="currentColor"/>
+                <line x1="50" y1="10" x2="50" y2="30" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+                <line x1="50" y1="70" x2="50" y2="90" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+                <line x1="10" y1="50" x2="30" y2="50" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+                <line x1="70" y1="50" x2="90" y2="50" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+            </svg>
+        </div>
+
+        <!-- Bottom Controls Hint -->
+        <div class="text-center text-slate-400 text-xs font-semibold tracking-widest bg-slate-900/60 backdrop-blur-sm py-2 px-4 rounded-full mx-auto border border-slate-700/50">
+            WASD 移動 | 滑鼠瞄準 | 點擊開火 (瞄準正確答案部位)
+        </div>
+    </div>
+
+    <!-- Start Overlay Screen -->
+    <div id="start-screen" class="absolute inset-0 z-30 flex items-center justify-center bg-slate-950/90 backdrop-blur-lg">
+        <div class="max-w-xl w-full mx-4 bg-slate-900 p-8 rounded-2xl neon-border text-center flex flex-col items-center gap-6">
+            <div class="space-y-2">
+                <h1 class="text-5xl font-black font-orbitron text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-teal-300 to-indigo-400 tracking-wider">
+                    MATH DEFENDER
+                </h1>
+                <p class="text-cyan-300/80 font-bold tracking-widest text-sm">3D 科幻數理解構防衛戰</p>
+            </div>
+
+            <div class="bg-slate-950/70 p-5 rounded-xl border border-slate-800 text-left text-slate-300 space-y-3 text-sm leading-relaxed w-full">
+                <div class="text-cyan-400 font-bold font-orbitron border-b border-slate-800 pb-2">【 戰術指令說明 】</div>
+                <ul class="list-disc list-inside space-y-1.5 text-slate-300">
+                    <li><strong class="text-white">移動與瞄準：</strong>使用 <span class="bg-slate-800 px-2 py-0.5 rounded text-cyan-300 border border-slate-700">WASD</span> 移動，滑鼠控制視角與瞄準。</li>
+                    <li><strong class="text-white">運算算式：</strong>敵方機器人頭頂會顯示題目（例如：<span class="text-amber-300">8 + 5 = ?</span>）。</li>
+                    <li><strong class="text-white">準確射擊：</strong>觀察機器人的<span class="text-cyan-300">胸口</span>、<span class="text-cyan-300">左腿</span>與<span class="text-cyan-300">右腿</span>，射擊顯示<strong class="text-emerald-400">正確答案</strong>的部位！</li>
+                    <li><strong class="text-white">錯誤懲罰：</strong>射擊錯誤部位會使機器人<strong class="text-rose-400">狂暴化加速衝鋒</strong>！</li>
+                    <li><strong class="text-white">波次提升：</strong>每獲得 <span class="text-amber-400 font-bold">500 分</span>波次加一，敵軍移動加快且題目變難。</li>
+                </ul>
+            </div>
+
+            <button id="start-btn" class="w-full py-4 bg-gradient-to-r from-cyan-500 via-teal-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-slate-950 font-black font-orbitron text-xl rounded-xl shadow-lg shadow-cyan-500/30 transition-all transform hover:scale-[1.02] active:scale-[0.98] cursor-pointer">
+                DEPLOY SYSTEM (開始戰鬥)
+            </button>
+        </div>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="game-over-screen" class="absolute inset-0 z-30 flex items-center justify-center bg-slate-950/95 backdrop-blur-xl hidden">
+        <div class="max-w-md w-full mx-4 bg-slate-900 p-8 rounded-2xl neon-border-red text-center flex flex-col items-center gap-6">
+            <div class="space-y-1">
+                <div class="text-rose-500 font-bold tracking-widest text-sm animate-pulse">CRITICAL SYSTEM FAILURE</div>
+                <h2 class="text-4xl font-black font-orbitron text-rose-500 neon-text-red">DEFENSE FAILED</h2>
+            </div>
+
+            <div class="w-full bg-slate-950/80 p-5 rounded-xl border border-rose-900/40 space-y-3">
+                <div class="flex justify-between items-center text-slate-400">
+                    <span>最終得分 (Final Score)</span>
+                    <span id="final-score" class="text-2xl font-orbitron font-bold text-cyan-400">0</span>
+                </div>
+                <div class="flex justify-between items-center text-slate-400">
+                    <span>抵禦波次 (Waves Reached)</span>
+                    <span id="final-wave" class="text-2xl font-orbitron font-bold text-amber-400">1</span>
+                </div>
+            </div>
+
+            <button id="restart-btn" class="w-full py-4 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-black font-orbitron text-lg rounded-xl shadow-lg shadow-rose-600/30 transition-all transform hover:scale-[1.02] active:scale-[0.98] cursor-pointer">
+                REBOOT SYSTEM (重新開始)
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Web Audio API Synthesizer for retro sci-fi sounds without external files
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new AudioContext();
+            }
+        }
+
+        function playGunshot() {
+            if (!audioCtx) return;
+            const now = audioCtx.currentTime;
+            
+            // White noise burst
+            const bufferSize = audioCtx.sampleRate * 0.1;
+            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = Math.random() * 2 - 1;
+            }
+
+            const noise = audioCtx.createBufferSource();
+            noise.buffer = buffer;
+
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(3000, now);
+            filter.frequency.exponentialRampToValueAtTime(100, now + 0.1);
+
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(0.5, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+
+            noise.connect(filter);
+            filter.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            // Laser Sine sweep
+            const osc = audioCtx.createOscillator();
+            const oscGain = audioCtx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(600, now);
+            osc.frequency.exponentialRampToValueAtTime(60, now + 0.12);
+
+            oscGain.gain.setValueAtTime(0.3, now);
+            oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+
+            osc.connect(oscGain);
+            oscGain.connect(audioCtx.destination);
+
+            noise.start(now);
+            osc.start(now);
+            noise.stop(now + 0.1);
+            osc.stop(now + 0.12);
+        }
+
+        function playHitSound() {
+            if (!audioCtx) return;
+            const now = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(440, now);
+            osc.frequency.exponentialRampToValueAtTime(880, now + 0.15);
+
+            gain.gain.setValueAtTime(0.4, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start(now);
+            osc.stop(now + 0.2);
+        }
+
+        function playErrorSound() {
+            if (!audioCtx) return;
+            const now = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(180, now);
+            osc.frequency.setValueAtTime(120, now + 0.1);
+
+            gain.gain.setValueAtTime(0.4, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start(now);
+            osc.stop(now + 0.25);
+        }
+
+        function playDamageSound() {
+            if (!audioCtx) return;
+            const now = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(100, now);
+            osc.frequency.exponentialRampToValueAtTime(30, now + 0.3);
+
+            gain.gain.setValueAtTime(0.6, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start(now);
+            osc.stop(now + 0.3);
+        }
+
+        // Game Engine Variables
+        let scene, camera, renderer, raycaster;
+        let isGameActive = false;
+        let score = 0;
+        let wave = 1;
+        let shield = 100;
+        let robots = [];
+        let particles = [];
+        let lastSpawnTime = 0;
+        let spawnInterval = 3500; // ms
+
+        // Gun & Animation
+        let gunGroup;
+        let recoilTime = 0;
+
+        // Player Controls
+        const moveState = { forward: false, backward: false, left: false, right: false };
+        let playerPos = { x: 0, z: 0 };
+        const moveSpeed = 0.15;
+        let yaw = 0, pitch = 0;
+
+        // Dynamic Canvas Textures Cache
+        function createTextTexture(text, label, bgColor = '#0a0f24', textColor = '#00f3ff', borderColor = '#00f3ff') {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+
+            // Background
+            ctx.fillStyle = bgColor;
+            ctx.fillRect(0, 0, 256, 256);
+
+            // Sci-fi Cyber Frame
+            ctx.strokeStyle = borderColor;
+            ctx.lineWidth = 10;
+            ctx.strokeRect(10, 10, 236, 236);
+
+            ctx.fillStyle = borderColor;
+            ctx.fillRect(15, 15, 30, 8);
+            ctx.fillRect(211, 15, 30, 8);
+
+            // Label (e.g. CHEST, L-LEG)
+            if (label) {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+                ctx.font = 'bold 22px Orbitron, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(label, 128, 50);
+            }
+
+            // Big Answer Number Text
+            ctx.fillStyle = textColor;
+            ctx.font = 'bold 85px Orbitron, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text.toString(), 128, label ? 145 : 128);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.needsUpdate = true;
+            return texture;
+        }
+
+        function createQuestionBillboardTexture(questionText) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+
+            // Glassmorphism Dark Background
+            ctx.fillStyle = 'rgba(5, 10, 25, 0.9)';
+            ctx.fillRect(0, 0, 512, 128);
+
+            // Glowing Neon Border
+            ctx.strokeStyle = '#ffe600';
+            ctx.lineWidth = 8;
+            ctx.strokeRect(6, 6, 500, 116);
+
+            // Text
+            ctx.fillStyle = '#ffe600';
+            ctx.font = 'bold 52px Orbitron, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(questionText, 256, 64);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.needsUpdate = true;
+            return texture;
+        }
+
+        function generateMathProblem(currentWave) {
+            let num1, num2, op, ans;
+
+            if (currentWave === 1) {
+                // Wave 1: Simple Addition/Subtraction up to 15
+                num1 = Math.floor(Math.random() * 9) + 1;
+                num2 = Math.floor(Math.random() * 9) + 1;
+                op = Math.random() > 0.4 ? '+' : '-';
+                if (op === '-' && num1 < num2) [num1, num2] = [num2, num1]; // Keep positive
+            } else if (currentWave === 2) {
+                // Wave 2: Addition/Subtraction up to 30, simple multiplication
+                if (Math.random() > 0.4) {
+                    num1 = Math.floor(Math.random() * 15) + 5;
+                    num2 = Math.floor(Math.random() * 15) + 2;
+                    op = Math.random() > 0.5 ? '+' : '-';
+                    if (op === '-' && num1 < num2) [num1, num2] = [num2, num1];
+                } else {
+                    num1 = Math.floor(Math.random() * 5) + 2;
+                    num2 = Math.floor(Math.random() * 5) + 2;
+                    op = 'x';
+                }
+            } else {
+                // Wave 3+: Larger numbers, mixed operators
+                const ops = ['+', '-', 'x'];
+                op = ops[Math.floor(Math.random() * ops.length)];
+                if (op === 'x') {
+                    num1 = Math.floor(Math.random() * 9) + 2;
+                    num2 = Math.floor(Math.random() * 9) + 2;
+                } else {
+                    num1 = Math.floor(Math.random() * 35) + 10;
+                    num2 = Math.floor(Math.random() * 30) + 5;
+                    if (op === '-' && num1 < num2) [num1, num2] = [num2, num1];
+                }
+            }
+
+            if (op === '+') ans = num1 + num2;
+            else if (op === '-') ans = num1 - num2;
+            else if (op === 'x') ans = num1 * num2;
+
+            const questionStr = `${num1} ${op} ${num2} = ?`;
+
+            // Generate two distinct distractor wrong answers
+            let distractors = new Set();
+            while (distractors.size < 2) {
+                let offset = (Math.floor(Math.random() * 5) + 1) * (Math.random() > 0.5 ? 1 : -1);
+                let wrongAns = ans + offset;
+                if (wrongAns >= 0 && wrongAns !== ans) {
+                    distractors.add(wrongAns);
+                }
+            }
+            const distractorArray = Array.from(distractors);
+
+            // Assign options to body parts randomly
+            const parts = ['chest', 'leftLeg', 'rightLeg'];
+            parts.sort(() => Math.random() - 0.5);
+
+            const partMap = {};
+            partMap[parts[0]] = ans;                     // Correct answer
+            partMap[parts[1]] = distractorArray[0];      // Wrong 1
+            partMap[parts[2]] = distractorArray[1];      // Wrong 2
+
+            return {
+                question: questionStr,
+                correctAnswer: ans,
+                correctPart: parts[0],
+                partValues: partMap
+            };
+        }
+
+        function initScene() {
+            const container = document.getElementById('canvas-container');
+
+            // Scene setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x020208);
+            scene.fog = new THREE.FogExp2(0x020208, 0.022);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 1.7, 0); // Eye height
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            raycaster = new THREE.Raycaster();
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x1a2b4c, 1.2);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0x00f3ff, 1.5);
+            dirLight.position.set(20, 40, -20);
+            scene.add(dirLight);
+
+            const pointLight = new THREE.PointLight(0xff0055, 0.8, 30);
+            pointLight.position.set(0, 5, -10);
+            scene.add(pointLight);
+
+            // Cyber Floor Grid
+            const gridHelper = new THREE.GridHelper(120, 60, 0x00f3ff, 0x052040);
+            gridHelper.position.y = 0;
+            scene.add(gridHelper);
+
+            // Dark Plane Base
+            const planeGeo = new THREE.PlaneGeometry(120, 120);
+            const planeMat = new THREE.MeshStandardMaterial({ color: 0x030510, roughness: 0.8, metalness: 0.2 });
+            const plane = new THREE.Mesh(planeGeo, planeMat);
+            plane.rotation.x = -Math.PI / 2;
+            scene.add(plane);
+
+            // Distant Sci-Fi Pillars for ambience
+            for (let i = 0; i < 16; i++) {
+                const pillarGeo = new THREE.BoxGeometry(1.5, 20, 1.5);
+                const pillarMat = new THREE.MeshStandardMaterial({ color: 0x081226, metalness: 0.8, roughness: 0.2 });
+                const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+                const angle = (i / 16) * Math.PI * 2;
+                pillar.position.set(Math.cos(angle) * 35, 10, Math.sin(angle) * 35 - 30);
+                scene.add(pillar);
+            }
+
+            // Create Player Gun Model
+            createGun();
+
+            // Window Resize
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function createGun() {
+            gunGroup = new THREE.Group();
+
+            // Main Barrel Body
+            const bodyGeo = new THREE.BoxGeometry(0.12, 0.14, 0.6);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x111827, metalness: 0.9, roughness: 0.2 });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+
+            // Glowing Energy Core Strip
+            const coreGeo = new THREE.BoxGeometry(0.04, 0.04, 0.4);
+            const coreMat = new THREE.MeshBasicMaterial({ color: 0x00f3ff });
+            const core = new THREE.Mesh(coreGeo, coreMat);
+            core.position.set(0, 0.04, -0.05);
+
+            // Muzzle Tip
+            const tipGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.15, 16);
+            const tipMat = new THREE.MeshStandardMaterial({ color: 0x374151, metalness: 0.8 });
+            const tip = new THREE.Mesh(tipGeo, tipMat);
+            tip.rotation.x = Math.PI / 2;
+            tip.position.set(0, 0, -0.35);
+
+            gunGroup.add(body);
+            gunGroup.add(core);
+            gunGroup.add(tip);
+
+            // Position gun in front of camera
+            gunGroup.position.set(0.25, -0.22, -0.5);
+            camera.add(gunGroup);
+            scene.add(camera);
+        }
+
+        function createRobotEnemy(mathData) {
+            const robotGroup = new THREE.Group();
+            
+            // Materials
+            const bodyMetalMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.7, roughness: 0.3 });
+            const jointMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.9 });
+
+            // 1. Head
+            const headGeo = new THREE.BoxGeometry(0.7, 0.6, 0.6);
+            const headMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.8 });
+            const head = new THREE.Mesh(headGeo, headMat);
+            head.position.y = 2.3;
+            robotGroup.add(head);
+
+            // Glowing Robot Eye
+            const eyeGeo = new THREE.BoxGeometry(0.4, 0.1, 0.1);
+            const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0055 });
+            const eye = new THREE.Mesh(eyeGeo, eyeMat);
+            eye.position.set(0, 2.35, -0.31);
+            robotGroup.add(eye);
+
+            // Floating Math Question Billboard above head
+            const qTexture = createQuestionBillboardTexture(mathData.question);
+            const qGeo = new THREE.PlaneGeometry(2.4, 0.6);
+            const qMat = new THREE.MeshBasicMaterial({ map: qTexture, transparent: true, side: THREE.DoubleSide });
+            const billboard = new THREE.Mesh(qGeo, qMat);
+            billboard.position.set(0, 3.1, 0);
+            robotGroup.add(billboard);
+
+            // 2. Chest (Torso) - Target Area 1
+            const chestTexture = createTextTexture(mathData.partValues.chest, 'CHEST', '#020617', '#00f3ff', '#00f3ff');
+            const chestGeo = new THREE.BoxGeometry(1.1, 1.0, 0.7);
+            const chestMat = new THREE.MeshStandardMaterial({ map: chestTexture, metalness: 0.5, roughness: 0.4 });
+            const chest = new THREE.Mesh(chestGeo, chestMat);
+            chest.position.y = 1.4;
+            chest.userData = { partType: 'chest', isRobotPart: true };
+            robotGroup.add(chest);
+
+            // 3. Left Leg - Target Area 2
+            const leftLegTexture = createTextTexture(mathData.partValues.leftLeg, 'L-LEG', '#020617', '#ffe600', '#ffe600');
+            const legGeo = new THREE.BoxGeometry(0.45, 0.9, 0.45);
+            const leftLegMat = new THREE.MeshStandardMaterial({ map: leftLegTexture, metalness: 0.5, roughness: 0.4 });
+            const leftLeg = new THREE.Mesh(legGeo, leftLegMat);
+            leftLeg.position.set(-0.35, 0.45, 0);
+            leftLeg.userData = { partType: 'leftLeg', isRobotPart: true };
+            robotGroup.add(leftLeg);
+
+            // 4. Right Leg - Target Area 3
+            const rightLegTexture = createTextTexture(mathData.partValues.rightLeg, 'R-LEG', '#020617', '#ff0055', '#ff0055');
+            const rightLegMat = new THREE.MeshStandardMaterial({ map: rightLegTexture, metalness: 0.5, roughness: 0.4 });
+            const rightLeg = new THREE.Mesh(legGeo, rightLegMat);
+            rightLeg.position.set(0.35, 0.45, 0);
+            rightLeg.userData = { partType: 'rightLeg', isRobotPart: true };
+            robotGroup.add(rightLeg);
+
+            // Arms (Visual Polish)
+            const armGeo = new THREE.BoxGeometry(0.3, 0.8, 0.3);
+            const leftArm = new THREE.Mesh(armGeo, bodyMetalMat);
+            leftArm.position.set(-0.8, 1.4, 0);
+            robotGroup.add(leftArm);
+
+            const rightArm = new THREE.Mesh(armGeo, bodyMetalMat);
+            rightArm.position.set(0.8, 1.4, 0);
+            robotGroup.add(rightArm);
+
+            // Initial Spawn Position: Z around -50 to -70
+            const spawnX = (Math.random() - 0.5) * 16;
+            const spawnZ = -50 - Math.random() * 20;
+            robotGroup.position.set(spawnX, 0, spawnZ);
+
+            // Store Robot Data
+            robotGroup.userData = {
+                mathData: mathData,
+                baseSpeed: 0.04 + (wave * 0.012),
+                speedMultiplier: 1.0,
+                walkCycle: Math.random() * 100,
+                chestMesh: chest,
+                leftLegMesh: leftLeg,
+                rightLegMesh: rightLeg,
+                leftArm: leftArm,
+                rightArm: rightArm,
+                isEnraged: false
+            };
+
+            scene.add(robotGroup);
+            robots.push(robotGroup);
+        }
+
+        function createExplosion(pos) {
+            const particleCount = 25;
+            const geometry = new THREE.BufferGeometry();
+            const positions = [];
+            const velocities = [];
+
+            for (let i = 0; i < particleCount; i++) {
+                positions.push(pos.x, pos.y + 1, pos.z);
+                velocities.push(
+                    (Math.random() - 0.5) * 0.3,
+                    (Math.random() - 0.5) * 0.3 + 0.1,
+                    (Math.random() - 0.5) * 0.3
+                );
+            }
+
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            const material = new THREE.PointsMaterial({
+                color: 0x00f3ff,
+                size: 0.25,
+                transparent: true,
+                opacity: 1
+            });
+
+            const pSystem = new THREE.Points(geometry, material);
+            scene.add(pSystem);
+
+            particles.push({
+                mesh: pSystem,
+                velocities: velocities,
+                life: 1.0
+            });
+        }
+
+        function setupControls() {
+            // Keyboard Controls
+            document.addEventListener('keydown', (e) => {
+                if (!isGameActive) return;
+                switch (e.code) {
+                    case 'KeyW': moveState.forward = true; break;
+                    case 'KeyS': moveState.backward = true; break;
+                    case 'KeyA': moveState.left = true; break;
+                    case 'KeyD': moveState.right = true; break;
+                }
+            });
+
+            document.addEventListener('keyup', (e) => {
+                switch (e.code) {
+                    case 'KeyW': moveState.forward = false; break;
+                    case 'KeyS': moveState.backward = false; break;
+                    case 'KeyA': moveState.left = false; break;
+                    case 'KeyD': moveState.right = false; break;
+                }
+            });
+
+            // Pointer Lock for FPS Mouse Control
+            document.addEventListener('mousemove', (e) => {
+                if (!isGameActive || document.pointerLockElement !== document.body) return;
+
+                const sensitivity = 0.002;
+                yaw -= e.movementX * sensitivity;
+                pitch -= e.movementY * sensitivity;
+
+                // Clamp pitch
+                pitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, pitch));
+
+                camera.rotation.order = 'YXZ';
+                camera.rotation.y = yaw;
+                camera.rotation.x = pitch;
+            });
+
+            // Click to Shoot
+            document.addEventListener('mousedown', (e) => {
+                if (!isGameActive) return;
+
+                // Request Pointer Lock if not locked
+                if (document.pointerLockElement !== document.body) {
+                    document.body.requestPointerLock();
+                    return;
+                }
+
+                if (e.button === 0) { // Left click
+                    shootWeapon();
+                }
+            });
+
+            // Start & Restart Buttons
+            document.getElementById('start-btn').addEventListener('click', () => {
+                initAudio();
+                document.body.requestPointerLock();
+                startGame();
+            });
+
+            document.getElementById('restart-btn').addEventListener('click', () => {
+                document.body.requestPointerLock();
+                startGame();
+            });
+        }
+
+        function shootWeapon() {
+            // Play Gunshot Sound & Recoil
+            playGunshot();
+            recoilTime = 1.0;
+
+            // Perform Raycasting from center of viewport (0, 0)
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+
+            // Collect all interactive robot target meshes
+            const targetMeshes = [];
+            robots.forEach(r => {
+                targetMeshes.push(r.userData.chestMesh, r.userData.leftLegMesh, r.userData.rightLegMesh);
+            });
+
+            const intersects = raycaster.intersectObjects(targetMeshes);
+
+            if (intersects.length > 0) {
+                const hitMesh = intersects[0].object;
+                const hitPartType = hitMesh.userData.partType;
+
+                // Find parent robot group
+                let robotGroup = hitMesh.parent;
+                const mathData = robotGroup.userData.mathData;
+
+                if (hitPartType === mathData.correctPart) {
+                    // --- CORRECT SHOT ---
+                    playHitSound();
+                    createExplosion(robotGroup.position);
+                    showFeedback('CORRECT! +100', 'text-emerald-400');
+
+                    // Increase Score
+                    score += 100;
+                    document.getElementById('score-display').innerText = score;
+
+                    // Wave Upgrade Logic (Every 500 points wave + 1)
+                    const newWave = Math.floor(score / 500) + 1;
+                    if (newWave > wave) {
+                        wave = newWave;
+                        document.getElementById('wave-display').innerText = wave;
+                        showFeedback(`WAVE ${wave} STARTED!`, 'text-amber-400');
+                    }
+
+                    // Remove Robot
+                    scene.remove(robotGroup);
+                    robots = robots.filter(r => r !== robotGroup);
+
+                } else {
+                    // --- WRONG SHOT ---
+                    playErrorSound();
+                    showFeedback('WRONG ANSWER! ENRAGED!', 'text-rose-500');
+
+                    // Penalty: Enrage robot (Massively speed up)
+                    robotGroup.userData.speedMultiplier = 2.8;
+                    robotGroup.userData.isEnraged = true;
+
+                    // Flash red warning color
+                    hitMesh.material.color.setHex(0xff0000);
+                }
+            }
+        }
+
+        function showFeedback(text, colorClass) {
+            const feedbackElem = document.getElementById('hit-feedback');
+            const textElem = document.getElementById('feedback-text');
+
+            textElem.innerText = text;
+            textElem.className = `font-orbitron text-3xl font-extrabold tracking-wider ${colorClass} neon-text-cyan`;
+
+            feedbackElem.style.opacity = '1';
+            feedbackElem.style.transform = 'translate(-50%, -70%) scale(1.1)';
+
+            setTimeout(() => {
+                feedbackElem.style.opacity = '0';
+                feedbackElem.style.transform = 'translate(-50%, -50%) scale(1.0)';
+            }, 800);
+        }
+
+        function triggerDamageEffect() {
+            playDamageSound();
+            shield = Math.max(0, shield - 20);
+
+            // Update HUD
+            document.getElementById('hp-text').innerText = `${shield}%`;
+            document.getElementById('hp-bar').style.width = `${shield}%`;
+
+            // Screen Vignette Flash
+            const vignette = document.getElementById('vignette');
+            vignette.classList.add('damage-flash');
+            vignette.style.opacity = '1';
+
+            setTimeout(() => {
+                vignette.style.opacity = '0';
+                setTimeout(() => vignette.classList.remove('damage-flash'), 200);
+            }, 200);
+
+            if (shield <= 0) {
+                gameOver();
+            }
+        }
+
+        function startGame() {
+            // Reset variables
+            score = 0;
+            wave = 1;
+            shield = 100;
+            spawnInterval = 3500;
+            lastSpawnTime = Date.now();
+
+            // Clear existing robots
+            robots.forEach(r => scene.remove(r));
+            robots = [];
+
+            // Reset HUD
+            document.getElementById('score-display').innerText = '0';
+            document.getElementById('wave-display').innerText = '1';
+            document.getElementById('hp-text').innerText = '100%';
+            document.getElementById('hp-bar').style.width = '100%';
+
+            // Reset Camera / Player Position
+            camera.position.set(0, 1.7, 0);
+            yaw = 0;
+            pitch = 0;
+            camera.rotation.set(0, 0, 0);
+
+            // UI Screens Toggle
+            document.getElementById('start-screen').classList.add('hidden');
+            document.getElementById('game-over-screen').classList.add('hidden');
+            document.getElementById('hud').classList.remove('hidden');
+
+            isGameActive = true;
+
+            // Spawn first robot
+            spawnRobot();
+        }
+
+        function gameOver() {
+            isGameActive = false;
+            document.exitPointerLock();
+
+            document.getElementById('final-score').innerText = score;
+            document.getElementById('final-wave').innerText = wave;
+
+            document.getElementById('hud').classList.add('hidden');
+            document.getElementById('game-over-screen').classList.remove('hidden');
+        }
+
+        function spawnRobot() {
+            const problem = generateMathProblem(wave);
+            createRobotEnemy(problem);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (isGameActive) {
+                const now = Date.now();
+
+                // 1. Spawning Loop
+                const currentSpawnDelay = Math.max(1200, spawnInterval - (wave - 1) * 450);
+                if (now - lastSpawnTime > currentSpawnDelay) {
+                    spawnRobot();
+                    lastSpawnTime = now;
+                }
+
+                // 2. Player WASD Movement
+                const moveVector = new THREE.Vector3();
+                if (moveState.forward) moveVector.z -= 1;
+                if (moveState.backward) moveVector.z += 1;
+                if (moveState.left) moveVector.x -= 1;
+                if (moveState.right) moveVector.x += 1;
+
+                moveVector.normalize();
+                moveVector.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+
+                camera.position.x += moveVector.x * moveSpeed;
+                camera.position.z += moveVector.z * moveSpeed;
+
+                // Restrict Player Movement Bounds
+                camera.position.x = Math.max(-12, Math.min(12, camera.position.x));
+                camera.position.z = Math.max(-2, Math.min(4, camera.position.z));
+
+                // 3. Gun Recoil Interpolation
+                if (recoilTime > 0) {
+                    recoilTime -= 0.15;
+                    gunGroup.position.z = -0.5 + recoilTime * 0.08;
+                    gunGroup.rotation.x = recoilTime * 0.15;
+                } else {
+                    gunGroup.position.set(0.25, -0.22, -0.5);
+                    gunGroup.rotation.set(0, 0, 0);
+                }
+
+                // 4. Update Robots (Movement, Walking Animation, Near-Zone Slowdown)
+                for (let i = robots.length - 1; i >= 0; i--) {
+                    const robot = robots[i];
+                    const rData = robot.userData;
+
+                    // Near Zone (Z > -15) Slowdown mechanics
+                    let slowFactor = 1.0;
+                    if (robot.position.z > -15) {
+                        slowFactor = 0.45; // Slow down when close to player
+                    }
+
+                    // Calculate total speed
+                    const currentSpeed = rData.baseSpeed * rData.speedMultiplier * slowFactor;
+                    robot.position.z += currentSpeed;
+
+                    // Wave walking animation
+                    rData.walkCycle += 0.08 * (currentSpeed / rData.baseSpeed);
+                    const legAngle = Math.sin(rData.walkCycle) * 0.4;
+                    rData.leftLegMesh.rotation.x = legAngle;
+                    rData.rightLegMesh.rotation.x = -legAngle;
+                    rData.leftArm.rotation.x = -legAngle;
+                    rData.rightArm.rotation.x = legAngle;
+
+                    // Robot reaches player boundary (Z > -1.5)
+                    if (robot.position.z >= -1.5) {
+                        triggerDamageEffect();
+                        scene.remove(robot);
+                        robots.splice(i, 1);
+                    }
+                }
+
+                // 5. Update Particle Effects
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    const p = particles[i];
+                    p.life -= 0.04;
+                    p.mesh.material.opacity = p.life;
+
+                    const positions = p.mesh.geometry.attributes.position.array;
+                    for (let j = 0; j < positions.length / 3; j++) {
+                        positions[j * 3] += p.velocities[j * 3];
+                        positions[j * 3 + 1] += p.velocities[j * 3 + 1];
+                        positions[j * 3 + 2] += p.velocities[j * 3 + 2];
+                    }
+                    p.mesh.geometry.attributes.position.needsUpdate = true;
+
+                    if (p.life <= 0) {
+                        scene.remove(p.mesh);
+                        particles.splice(i, 1);
+                    }
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // Initialize Everything on Window Load
+        window.onload = () => {
+            initScene();
+            setupControls();
+            animate();
+        };
+    </script>
+</body>
+</html>
